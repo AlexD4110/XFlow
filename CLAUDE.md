@@ -24,3 +24,21 @@ Full build spec: docs/BUILD_SPEC.md — read it before starting any phase.
 - Anything that needs a real permission grant, a real fn press, a real microphone, or a real paste into another app is a manual check. List the exact steps for me and leave it unchecked.
 - One ticket per branch, one pull request per ticket. Never merge or close an issue until I confirm the manual checks on my machine.
 - Spec §2 and §12 (Wispr reference behavior and Hopper questions) are background only. Never create tickets or code from them.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues for `AlexD4110/XFlow`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The seven canonical triage roles, each mapped to a label of the same name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one root `GLOSSARY.md`, ADRs in `docs/adr/`. See `docs/agents/domain.md`.
+
+### External peers
+
+`auto` — select the hardened Claude or Codex adapter from host metadata. See `docs/agents/cross-model.json`.
