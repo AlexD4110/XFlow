@@ -10,6 +10,10 @@ let package = Package(
         .target(
             name: "DictationCore"
         ),
+        .executableTarget(
+            name: "DictationApp",
+            dependencies: ["DictationCore"]
+        ),
         .testTarget(
             name: "DictationCoreTests",
             dependencies: ["DictationCore"]
