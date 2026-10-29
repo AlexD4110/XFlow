@@ -2,7 +2,7 @@
 
 Oct 28, 2026 · @Alex
 
-A free, unlimited, fully-local macOS voice-dictation app, modeled on Wispr Flow's behavior but with on-device transcription and no cloud or account dependency.
+A free, unlimited, fully-local macOS voice-dictation app, modeled on a reference dictation app's behavior but with on-device transcription and no cloud or account dependency.
 
 ---
 
@@ -19,22 +19,22 @@ Build a macOS dictation app that turns held-key speech into text pasted at the c
 
 **Non-goals**
 - No cloud transcription, account, or network dependency. The pipeline is local by design.
-- No reuse of Wispr Flow's servers, endpoints, auth tokens, or licensed assets. Wispr Flow is studied only as a behavioral reference for an app the builder owns a copy of.
-- Not a line-for-line clone of Wispr's code or UI; we mirror mechanisms, not source.
+- No reuse of the reference app's servers, endpoints, auth tokens, or licensed assets. The reference app is studied only as a behavioral reference for an app the builder owns a copy of.
+- Not a line-for-line clone of the reference app's code or UI; we mirror mechanisms, not source.
 
 **Target platform:** macOS on Apple Silicon (primary). A native helper process is required for the fn key and Accessibility; the rest can be Swift, Electron, or Python.
 
 ---
 
-## 2. Reference Behavior — Wispr Flow (Observed)
+## 2. Reference Behavior — Reference App (Observed)
 
-Wispr Flow is an Electron app with a bundled native Swift helper. The UI/orchestration lives in Electron; everything Electron cannot do (the fn key, Accessibility, key injection) lives in the helper, which Electron spawns as a child process.
+The reference app is an Electron app with a bundled native Swift helper. The UI/orchestration lives in Electron; everything Electron cannot do (the fn key, Accessibility, key injection) lives in the helper, which Electron spawns as a child process.
 
 **Provenance.** Findings come from two static-analysis passes, both on an owned copy, nothing executed:
 1. The shipped `app.asar` main-process bundle (JavaScript), via REA JS analysis and targeted string reads.
 2. The native Swift helper binary, disassembled and decompiled in Hopper (manual read).
 
-Binary analyzed: `Wispr Flow.app/Contents/Resources/swift-helper-app-dist/Wispr Flow.app/Contents/MacOS/Wispr Flow` (Mach-O, arm64). SHA-256 `c4c4492b7209c5d8dea19da27b77ab558301baa62f4af9486d66b18569b303e9`. The native specifics that §4–§9 depend on are now confirmed in the binary rather than inferred from the JS side; the remaining unconfirmed items are listed in §12.
+Binary analyzed: the reference app's bundled native Swift helper (Mach-O, arm64). SHA-256 `c4c4492b7209c5d8dea19da27b77ab558301baa62f4af9486d66b18569b303e9`. The native specifics that §4–§9 depend on are now confirmed in the binary rather than inferred from the JS side; the remaining unconfirmed items are listed in §12.
 
 | Area | Observed | Confidence |
 |---|---|---|
@@ -64,31 +64,31 @@ Two processes: a native helper owns the fn key, ⌘V injection, and Accessibilit
 
 ## 4. fn Push-to-Talk Hotkey
 
-The fn key must be captured by a native `CGEventTap` in a helper process, not by Electron. Electron's `globalShortcut` cannot register fn at all, which is why Wispr's primary key lives in its Swift helper and `globalShortcut` is reserved for ordinary combos (Alt+K, Escape).
+The fn key must be captured by a native `CGEventTap` in a helper process, not by Electron. Electron's `globalShortcut` cannot register fn at all, which is why the reference app's primary key lives in its Swift helper and `globalShortcut` is reserved for ordinary combos (Alt+K, Escape).
 
-**Mechanism (as confirmed in Wispr's helper)**
-1. Create a session-level `CGEventTap` at head-insert position. Wispr's call is `CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, options, 0x6001c00, callback, ctx)`.
+**Mechanism (as confirmed in the reference app's helper)**
+1. Create a session-level `CGEventTap` at head-insert position. The reference app's call is `CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, options, 0x6001c00, callback, ctx)`.
 2. The mask `0x6001c00` selects **keyDown (bit 10), keyUp (bit 11), and flagsChanged (bit 12)**, plus two higher bits (25, 26) whose purpose is not confirmed. The fn (Globe) key surfaces as a flagsChanged event.
-3. In the callback's processing path, Wispr reads the modifier flags with `CGEventGetFlags`, then extracts **bit 23 (`kCGEventFlagMaskSecondaryFn`)** with a bitfield-extract (`ubfx x, flags, #23, #1`). It also reads the keycode via `CGEventGetIntegerValueField(event, 9)` and matches the fn keycode **`0x3f` (63)**. So it detects fn two ways: by flag bit and by keycode.
-4. On down → start dictation; on up → stop. Hold-to-talk (Wispr's `pushToTalk`). Also support a tap-to-toggle / hands-free lock mode (§10).
+3. In the callback's processing path, the reference app reads the modifier flags with `CGEventGetFlags`, then extracts **bit 23 (`kCGEventFlagMaskSecondaryFn`)** with a bitfield-extract (`ubfx x, flags, #23, #1`). It also reads the keycode via `CGEventGetIntegerValueField(event, 9)` and matches the fn keycode **`0x3f` (63)**. So it detects fn two ways: by flag bit and by keycode.
+4. On down → start dictation; on up → stop. Hold-to-talk (the reference app's `pushToTalk`). Also support a tap-to-toggle / hands-free lock mode (§10).
 5. Forward each transition to the orchestrator over the IPC channel (§6).
 
-**Consume vs observe (confirmed).** Wispr runs two separate taps with different intents:
+**Consume vs observe (confirmed).** The reference app runs two separate taps with different intents:
 - The **mouse "click tap"** is created ListenOnly (`options = 0x1`), mask `0x2` (left-mouse-down only). It only observes.
 - The **keyboard tap** is created in **default mode (`options = 0x0`), which is consuming-capable**, and it does conditionally consume. Its callback decides per-event whether to return the event (pass through) or return **NULL (swallow)**. This is how it hides the activation key and dictated keystrokes from the focused app. The ListenOnly variants that appear in the keyboard setup are throwaway probe taps used to test whether access is granted, then immediately invalidated.
 
 **Requirements & gotchas**
 - An event tap requires Accessibility permission (§5) even to receive events. Without it the tap is created but receives nothing.
-- Decide whether to consume fn or pass it through. fn also drives media/brightness and emoji; consuming it globally is hostile. Wispr's model is the pragmatic answer: run a consuming-capable tap but return NULL only for the keys you actually own, and pass everything else through. Prefer consuming only while actively dictating or only for the activation key itself.
+- Decide whether to consume fn or pass it through. fn also drives media/brightness and emoji; consuming it globally is hostile. The reference app's model is the pragmatic answer: run a consuming-capable tap but return NULL only for the keys you actually own, and pass everything else through. Prefer consuming only while actively dictating or only for the activation key itself.
 - The OS disables a tap that is slow or times out (`kCGEventTapDisabledByTimeout`). Handle that event and re-enable the tap (§12, Q6).
-- Keep the callback non-blocking. Wispr's callback hands off immediately and even watchdogs itself: it times each dispatch with `CFAbsoluteTimeGetCurrent` and logs when processing exceeds ~0.25s, because a slow callback is exactly what trips the timeout disable.
+- Keep the callback non-blocking. The reference app's callback hands off immediately and even watchdogs itself: it times each dispatch with `CFAbsoluteTimeGetCurrent` and logs when processing exceeds ~0.25s, because a slow callback is exactly what trips the timeout disable.
 - fn can be remapped by the user (System Settings → Keyboard). Offer an alternate trigger key as a fallback.
 
 ---
 
 ## 5. Permissions (Accessibility & Microphone)
 
-Two separate TCC permissions are required, requested at different moments. Wispr's helper preflights **three** CoreGraphics/AX checks at keyboard-service startup, confirmed in the binary: `AXIsProcessTrusted()`, `CGPreflightListenEventAccess()` (Input Monitoring / listen), and `CGPreflightPostEventAccess()` (permission to inject events). It assembles a status object keyed `accessibilityTrusted`, `listenEventAccess`, `postEventAccess` and reports it up to the UI.
+Two separate TCC permissions are required, requested at different moments. The reference app's helper preflights **three** CoreGraphics/AX checks at keyboard-service startup, confirmed in the binary: `AXIsProcessTrusted()`, `CGPreflightListenEventAccess()` (Input Monitoring / listen), and `CGPreflightPostEventAccess()` (permission to inject events). It assembles a status object keyed `accessibilityTrusted`, `listenEventAccess`, `postEventAccess` and reports it up to the UI.
 
 | Permission | Needed for | API | When to ask |
 |---|---|---|---|
@@ -97,7 +97,7 @@ Two separate TCC permissions are required, requested at different moments. Wispr
 | Post-event access | Injecting synthetic keystrokes (⌘V) | `CGPreflightPostEventAccess()` / `CGRequestPostEventAccess()` | Before first injection |
 | Microphone | Recording audio | `AVCaptureDevice.requestAccess(for: .audio)` | First time the user dictates |
 
-**Guided flow.** Accessibility cannot be granted programmatically; the user must toggle it in System Settings. Wispr ships a whole `FlowPermissionGuide.app` for this. Mirror that:
+**Guided flow.** Accessibility cannot be granted programmatically; the user must toggle it in System Settings. The reference app ships a whole `FlowPermissionGuide.app` for this. Mirror that:
 1. On launch, check `AXIsProcessTrusted()` and the two `CGPreflight...` statuses.
 2. If not trusted, show a guide window explaining why, then deep-link to the pane: `open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"`.
 3. Poll `AXIsProcessTrusted()` (or re-check on app re-activation) and advance the UI once granted.
@@ -112,11 +112,11 @@ Two separate TCC permissions are required, requested at different moments. Wispr
 
 ## 6. Main ↔ Helper IPC Protocol
 
-Wispr keeps control messages off stdout. The helper is spawned with four pipes (`stdio: [pipe, pipe, pipe, pipe]`) and fd 3 carries all IPC; stdout/stderr are logging only. Adopt the same split so log noise never corrupts the message stream.
+The reference app keeps control messages off stdout. The helper is spawned with four pipes (`stdio: [pipe, pipe, pipe, pipe]`) and fd 3 carries all IPC; stdout/stderr are logging only. Adopt the same split so log noise never corrupts the message stream.
 
 **Framing (observed in JS; byte-level detail not yet confirmed in the binary, see §12 Q7):** messages are separator-delimited and escaped, each a JSON object, parsed and validated against a typed schema. Two shapes travel the wire: `HelperAPIRequest` and `HelperAPIResponse`, a request/response RPC in both directions.
 
-**Message types to implement** (names mirror Wispr's observed vocabulary):
+**Message types to implement** (names mirror the reference app's observed vocabulary):
 
 | Direction | Message | Payload | Purpose |
 |---|---|---|---|
@@ -128,7 +128,7 @@ Wispr keeps control messages off stdout. The helper is spawned with four pipes (
 | helper → main | `AccessibilityStatus` | trusted/listen/post bools | permission state changes |
 
 **Design notes**
-- Pick a concrete separator (newline or NUL) and escape it in payloads; accumulate partial chunks and split on the delimiter (Wispr buffers `pendingData` and splits).
+- Pick a concrete separator (newline or NUL) and escape it in payloads; accumulate partial chunks and split on the delimiter (the reference app buffers `pendingData` and splits).
 - Give each request an id so responses can be matched; time out unanswered requests.
 - Validate every inbound message against a schema and reject malformed input. The helper runs with Accessibility privileges, so treat the boundary as a trust boundary.
 - If you build the whole app in one language (e.g. Swift menu-bar app), this becomes in-process calls and the pipe protocol is unnecessary; the two-process split is only needed when the orchestrator (Electron/Python) cannot host the native tap itself.
@@ -137,11 +137,11 @@ Wispr keeps control messages off stdout. The helper is spawned with four pipes (
 
 ## 7. Audio Capture & Local Transcription
 
-This is where our app diverges from Wispr: transcription runs on-device via whisper.cpp instead of a cloud endpoint. There is no network call and no per-word limit.
+This is where our app diverges from the reference app: transcription runs on-device via whisper.cpp instead of a cloud endpoint. There is no network call and no per-word limit.
 
 **Capture**
 - Start capture on dictation-start, stop on dictation-stop.
-- Record mono 16 kHz PCM (whisper's native rate) via AVAudioEngine, or capture at the device rate and downsample. Wispr also moves audio as PCM.
+- Record mono 16 kHz PCM (whisper's native rate) via AVAudioEngine, or capture at the device rate and downsample. The reference app also moves audio as PCM.
 - Buffer frames in memory; a hold-to-talk clip is short, so no disk spill is needed.
 
 **Transcription**
@@ -184,15 +184,15 @@ An optional stage that turns raw transcript into polished text, entirely on-devi
 
 ## 9. Text Insertion / Paste
 
-Wispr inserts via the clipboard, then restores what was there. Mirror that; it is the most compatible way to get text into an arbitrary app. The helper imports both a synthetic-paste path and a direct-AX-write path (see §12 Q4), so the clipboard+⌘V sequence below is the primary route with AX-set as an alternative.
+The reference app inserts via the clipboard, then restores what was there. Mirror that; it is the most compatible way to get text into an arbitrary app. The helper imports both a synthetic-paste path and a direct-AX-write path (see §12 Q4), so the clipboard+⌘V sequence below is the primary route with AX-set as an alternative.
 
-**Sequence (observed in Wispr, adopt as-is)**
+**Sequence (observed in the reference app, adopt as-is)**
 1. Save the current clipboard contents.
 2. `clipboard.writeText(finalText)`.
 3. Synthesize ⌘V into the focused app (native key injection via CGEvent).
 4. Restore the saved clipboard after a short delay.
 
-**Verification (Wispr's "content observation")**
+**Verification (the reference app's "content observation")**
 - Before/after, read the focused element's text via Accessibility (AXUIElement).
 - Compare observed text to what was pasted (`editDistanceToPasted`) to confirm it landed.
 - If the field is not editable or no text box is found, skip the paste and surface a notification instead of silently failing.
@@ -201,13 +201,13 @@ Wispr inserts via the clipboard, then restores what was there. Mirror that; it i
 - Restore timing: paste too fast and ⌘V may fire before the clipboard write is visible; restore too fast and you clobber the paste. Use a small delay and/or confirm via observation.
 - Secure fields (password inputs) and some sandboxed apps block synthetic paste; detect and degrade gracefully.
 - Preserve the user's clipboard format if you can (not just plain text), or at least restore plain text faithfully.
-- An alternative is direct AX insertion (`AXUIElementSetAttributeValue` on `kAXValueAttribute` / selected text), which Wispr's helper also links. It is less universally supported than ⌘V; clipboard+⌘V is the pragmatic default.
+- An alternative is direct AX insertion (`AXUIElementSetAttributeValue` on `kAXValueAttribute` / selected text), which the reference app's helper also links. It is less universally supported than ⌘V; clipboard+⌘V is the pragmatic default.
 
 ---
 
 ## 10. UX States, Sounds & Overlay
 
-Wispr's asset set reveals its interaction model: sounds named `dictation-start`, `dictation-stop`, `paste`, and `popo-lock`, plus a status window and overlays. Mirror the feedback, which is what makes dictation feel responsive.
+The reference app's asset set reveals its interaction model: sounds named `dictation-start`, `dictation-stop`, `paste`, and `popo-lock`, plus a status window and overlays. Mirror the feedback, which is what makes dictation feel responsive.
 
 **States**
 1. Idle — listening for the hotkey.
@@ -241,7 +241,7 @@ Wispr's asset set reveals its interaction model: sounds named `dictation-start`,
 
 **Process/bundle layout**
 - Keep the CGEventTap and the ⌘V injection in one native process so a single Accessibility grant covers both.
-- If using Electron/Python as the orchestrator, bundle the native helper inside the app (as Wispr does under `Resources/`), spawn it with the fd-3 pipe, and supervise/restart it on crash.
+- If using Electron/Python as the orchestrator, bundle the native helper inside the app (under `Resources/`), spawn it with the fd-3 pipe, and supervise/restart it on crash.
 
 **Distribution**
 - Notarize for Gatekeeper. whisper.cpp model files are large; download on first run or ship a small default model and offer larger ones as optional downloads.
@@ -250,7 +250,7 @@ Wispr's asset set reveals its interaction model: sounds named `dictation-start`,
 
 ## 12. Native Helper — Confirmed Findings & Remaining Questions
 
-Status of the seven questions after the manual Hopper read of the Swift helper. Five are confirmed, one is localized to a named function pending one more read, one is not started. These confirmations are for interoperability/learning on an owned copy. None of it uses Wispr's cloud API, which we are not replicating.
+Status of the seven questions after the manual Hopper read of the Swift helper. Five are confirmed, one is localized to a named function pending one more read, one is not started. These confirmations are for interoperability/learning on an owned copy. None of it uses the reference app's cloud API, which we are not replicating.
 
 | # | Question | Status | Evidence |
 |---|---|---|---|
@@ -278,7 +278,7 @@ Status of the seven questions after the manual Hopper read of the Swift helper. 
 | Binary SHA-256 | `c4c4492b7209c5d8dea19da27b77ab558301baa62f4af9486d66b18569b303e9` |
 
 **Observed design notes worth carrying into our build**
-- Wispr runs multiple independent taps (at least a mouse tap and a keyboard tap) rather than one combined tap. Our app only needs the keyboard tap.
+- The reference app runs multiple independent taps (at least a mouse tap and a keyboard tap) rather than one combined tap. Our app only needs the keyboard tap.
 - The keyboard callback is deliberately thin: dispatch, time it, return. All real logic is one call deeper. Keep our callback equally cheap to avoid tripping the OS timeout disable.
 - The consume decision is per-key, not global. The tap is consuming-capable but passes most events through, swallowing only the keys it owns. This is the right model for not breaking fn's other roles.
 
